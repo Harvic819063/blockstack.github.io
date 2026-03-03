@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Retro Tetris</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #1e1b4b; }
+        .grid-cell { width: 24px; height: 24px; border: 1px solid rgba(255,255,255,0.1); }
+        @media (max-width: 640px) { .grid-cell { width: 18px; height: 18px; } }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback, useRef } = React;
+
+        const BOARD_WIDTH = 10;
+        const BOARD_HEIGHT = 20;
+        const INITIAL_SPEED = 1000;
+
+        const TETROMINOES = {
+            I: { shape: [[1, 1, 1, 1]], color: 'bg-cyan-400' },
+            O: { shape: [[1, 1], [1, 1]], color: 'bg-yellow-400' },
+            T: { shape: [[0, 1, 0], [1, 1, 1]], color: 'bg-purple-400' },
+            S: { shape: [[0, 1, 1], [1, 1, 0]], color: 'bg-green-400' },
+            Z: { shape: [[1, 1, 0], [0, 1, 1]], color: 'bg-red-400' },
+            J: { shape: [[1, 0, 0], [1, 1, 1]], color: 'bg-blue-400' },
+            L: { shape: [[0, 0, 1], [1, 1, 1]], color: 'bg-orange-400' }
+        };
+
+        function TetrisGame() {
+            const [board, setBoard] = useState(() => Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill('')));
+            const [currentPiece, setCurrentPiece] = useState(null);
+            const [nextPiece, setNextPiece] = useState(null);
+            const [score, setScore] = useState(0);
+            const [level, setLevel] = useState(1);
+            const [gameRunning, setGameRunning] = useState(false);
+            const [gameOver, setGameOver] = useState(false);
+            const [speed, setSpeed] = useState(INITIAL_SPEED);
+
+            const createRandomPiece = useCallback(() => {
+                const keys = Object.keys(TETROMINOES);
+                const type = TETROMINOES[keys[Math.floor(Math.random() * keys.length)]];
+                return {
+                    shape: type.shape,
+                    color: type.color,
+                    x: Math.floor(BOARD_WIDTH / 2) - Math.floor(type.shape[0].length / 2),
+                    y: 0
+                };
+            }, []);
+
+            const isValidPosition = (piece, newX, newY, newShape) => {
+                const shape = newShape || piece.shape;
+                for (let y = 0; y < shape.length; y++) {
+                    for (let x = 0; x < shape[y].length; x++) {
+                        if (shape[y][x]) {
+                            const bX = newX + x;
+                            const bY = newY + y;
+                            if (bX < 0 || bX >= BOARD_WIDTH || bY >= BOARD_HEIGHT) return false;
+                            if (bY >= 0 && board[bY][bX]) return false;
+                        }
+                    }
+                }
+                return true;
+            };
+
+            const rotate = (piece) => {
+                const rotated = piece.shape[0].map((_, i) => piece.shape.map(row => row[i]).reverse());
+                if (isValidPosition(piece, piece.x, piece.y, rotated)) {
+                    setCurrentPiece({ ...piece, shape: rotated });
+                }
+            };
+
+            const move = useCallback((dx, dy) => {
+                if (!gameRunning || !currentPiece) return;
+                if (isValidPosition(currentPiece, currentPiece.x + dx, currentPiece.y + dy)) {
+                    setCurrentPiece(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
+                } else if (dy > 0) {
+                    lockPiece();
+                }
+            }, [currentPiece, gameRunning, board]);
+
+            const lockPiece = () => {
+                const newBoard = [...board.map(row => [...row])];
+                currentPiece.shape.forEach((row, y) => {
+                    row.forEach((cell, x) => {
+                        if (cell && currentPiece.y + y >= 0) {
+                            newBoard[currentPiece.y + y][currentPiece.x + x] = currentPiece.color;
+                        }
+                    });
+                });
+
+                // Clear lines
+                const filteredBoard = newBoard.filter(row => row.some(cell => cell === ''));
+                const cleared = BOARD_HEIGHT - filteredBoard.length;
+                while (filteredBoard.length < BOARD_HEIGHT) {
+                    filteredBoard.unshift(Array(BOARD_WIDTH).fill(''));
+                }
+
+                if (cleared > 0) {
+                    setScore(s => s + (cleared * 100 * level));
+                    setLevel(l => Math.floor(score / 1000) + 1);
+                }
+
+                if (currentPiece.y <= 0) {
+                    setGameOver(true);
+                    setGameRunning(false);
+                } else {
+                    setBoard(filteredBoard);
+                    setCurrentPiece(nextPiece);
+                    setNextPiece(createRandomPiece());
+                }
+            };
+
+            const hardDrop = () => {
+                if (!currentPiece || !gameRunning) return;
+                let newY = currentPiece.y;
+                while (isValidPosition(currentPiece, currentPiece.x, newY + 1)) newY++;
+                setCurrentPiece(prev => ({ ...prev, y: newY }));
+            };
+
+            useEffect(() => {
+                const handleKey = (e) => {
+                    if (!gameRunning) return;
+                    if (e.key === 'ArrowLeft') move(-1, 0);
+                    if (e.key === 'ArrowRight') move(1, 0);
+                    if (e.key === 'ArrowDown') move(0, 1);
+                    if (e.key === 'ArrowUp') rotate(currentPiece);
+                    if (e.key === ' ') hardDrop();
+                };
+                window.addEventListener('keydown', handleKey);
+                return () => window.removeEventListener('keydown', handleKey);
+            }, [gameRunning, currentPiece, move]);
+
+            useEffect(() => {
+                if (gameRunning) {
+                    const id = setInterval(() => move(0, 1), Math.max(100, INITIAL_SPEED - (level * 100)));
+                    return () => clearInterval(id);
+                }
+            }, [gameRunning, move, level]);
+
+            const start = () => {
+                setBoard(Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill('')));
+                setCurrentPiece(createRandomPiece());
+                setNextPiece(createRandomPiece());
+                setGameOver(false);
+                setGameRunning(true);
+                setScore(0);
+            };
+
+            return (
+                <div className="flex flex-col items-center justify-center min-h-screen text-white p-4">
+                    <h1 className="text-4xl font-bold mb-4 text-cyan-400">TETRIS</h1>
+                    
+                    <div className="flex flex-col md:flex-row gap-8 bg-gray-900 p-6 rounded-xl border border-gray-700 shadow-2xl">
+                        {/* Game Board */}
+                        <div className="bg-black border-2 border-gray-600">
+                            {board.map((row, y) => (
+                                <div key={y} className="flex">
+                                    {row.map((cell, x) => {
+                                        let color = cell;
+                                        if (currentPiece) {
+                                            const py = y - currentPiece.y;
+                                            const px = x - currentPiece.x;
+                                            if (py >= 0 && py < currentPiece.shape.length && px >= 0 && px < currentPiece.shape[0].length) {
+                                                if (currentPiece.shape[py][px]) color = currentPiece.color;
+                                            }
+                                        }
+                                        return <div key={x} className={`grid-cell ${color || 'bg-gray-900'}`} />;
+                                    })}
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Sidebar */}
+                        <div className="flex flex-col gap-4 w-48">
+                            <div className="bg-gray-800 p-4 rounded shadow">
+                                <p className="text-gray-400 text-xs uppercase">Score</p>
+                                <p className="text-2xl font-mono">{score}</p>
+                            </div>
+                            <div className="bg-gray-800 p-4 rounded shadow">
+                                <p className="text-gray-400 text-xs uppercase">Level</p>
+                                <p className="text-2xl font-mono">{level}</p>
+                            </div>
+                            
+                            <button onClick={gameRunning ? () => setGameRunning(false) : start} 
+                                    className="bg-cyan-600 hover:bg-cyan-500 py-2 rounded font-bold transition">
+                                {gameRunning ? 'PAUSE' : (gameOver ? 'RETRY' : 'START')}
+                            </button>
+
+                            <div className="mt-4 text-xs text-gray-400 space-y-1">
+                                <p>← → : Move</p>
+                                <p>↑ : Rotate</p>
+                                <p>↓ : Soft Drop</p>
+                                <p>Space : Hard Drop</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    {gameOver && (
+                        <div className="fixed inset-0 bg-black/80 flex items-center justify-center">
+                            <div className="text-center">
+                                <h2 className="text-5xl font-black text-red-500 mb-4">GAME OVER</h2>
+                                <button onClick={start} className="bg-white text-black px-6 py-2 rounded-full font-bold">PLAY AGAIN</button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<TetrisGame />);
+    </script>
+</body>
+</html>
